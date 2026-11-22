@@ -107,7 +107,7 @@ nav button.on{color:var(--felt2);font-weight:650}
 <header>
   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><circle cx="16" cy="16" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></svg>
   <h1>Cassa Backgammon</h1>
-  <span class="sync" id="sync">dati sul dispositivo</span>
+  <button class="sync" id="sync" data-act="syncNow" style="background:transparent;color:inherit;padding:4px 0">…</button>
 </header>
 <main id="app"></main>
 <nav id="nav">
@@ -128,19 +128,29 @@ const DEFAULT = () => ({
   players: { a: 'Claudio', b: 'Roberto' },
   sessions: [],   // {id,date,euroPerPoint,closed,paid,games:[{id,winner,points,tipo,cubo}]}
   withdrawals: [],// {id,date,amount,note}
+  deleted: [],    // id eliminati (per non farli ricomparire con la sincronizzazione)
+  playersMod: null,
   updatedAt: null
 });
 let state = load();
 let ui = { tab: 'sessione', winner: null, tipo: 1, cubo: 1 };
 
+function normalize(d){ return { ...DEFAULT(), ...d, deleted: d.deleted || [], withdrawals: d.withdrawals || [] }; }
 function load(){
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.sessions) return s; } catch(e){}
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.sessions) return normalize(s); } catch(e){}
   return DEFAULT();
 }
+// Ogni giornata/spesa modificata riceve un timestamp "mod": serve a unire i dati fra dispositivi.
+let snap = {};
+const sig = o => JSON.stringify({ ...o, mod: undefined });
+function snapshot(){ snap = {}; [...state.sessions, ...state.withdrawals].forEach(o => snap[o.id] = sig(o)); }
+function persist(){ try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){ toast('Impossibile salvare in locale'); } }
 function save(){
-  state.updatedAt = new Date().toISOString();
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e){ toast('Impossibile salvare in locale'); }
+  const now = new Date().toISOString();
+  [...state.sessions, ...state.withdrawals].forEach(o => { if (snap[o.id] !== sig(o)) o.mod = now; });
+  state.updatedAt = now; snapshot(); persist(); setDirty(true);
 }
+const tomb = id => { if (!state.deleted.includes(id)) state.deleted.push(id); };
 
 /* ===================== Calcoli ===================== */
 const eur = n => new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR'}).format(n||0);
@@ -328,6 +338,29 @@ function vImpostazioni(){
     <button class="primary block" style="margin-top:12px" data-act="saveNames">Salva nomi</button>
   </div>
   <div class="card">
+    <h2>Sincronizzazione GitHub</h2>
+    ${ghOn() ? `<p class="small" style="margin-top:0">Collegato a <b>${esc(gh.owner)}/${esc(gh.repo)}</b> · <code>${esc(gh.path)}</code><br>
+      <span class="muted">${meta.last ? 'Ultima sincronizzazione: '+new Date(meta.last).toLocaleString('it-IT') : 'Mai sincronizzato'}</span></p>` :
+      `<p class="small muted" style="margin-top:0">Collega un repo GitHub <b>privato</b>: telefono e Mac condivideranno lo stesso registro.</p>`}
+    <div class="grid2">
+      <div><label class="f">Utente</label><input id="ghOwner" value="${esc(gh.owner)}" autocapitalize="off"></div>
+      <div><label class="f">Repo</label><input id="ghRepo" value="${esc(gh.repo)}" autocapitalize="off"></div>
+    </div>
+    <div style="margin-top:10px"><label class="f">File</label><input id="ghPath" value="${esc(gh.path)}" autocapitalize="off"></div>
+    <div style="margin-top:10px"><label class="f">Token${ghOn()?' (lascia vuoto per non cambiarlo)':''}</label><input id="ghToken" type="password" placeholder="github_pat_…" autocomplete="off"></div>
+    <div class="grid2" style="margin-top:12px">
+      ${ghOn() ? '<button class="ghost" data-act="ghOff">Scollega</button>' : '<span></span>'}
+      <button class="primary" data-act="ghSave">${ghOn()?'Salva e sincronizza':'Collega'}</button>
+    </div>
+    <details class="small muted" style="margin-top:12px"><summary>Come creare il token</summary>
+      <ol style="padding-left:18px">
+        <li>Apri <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com → Fine-grained token</a></li>
+        <li>Repository access: <b>Only select repositories</b> → <code>${esc(gh.repo)}</code></li>
+        <li>Permissions → Repository → <b>Contents: Read and write</b></li>
+        <li>Genera, copia il token e incollalo qui (resta solo su questo dispositivo)</li>
+      </ol></details>
+  </div>
+  <div class="card">
     <h2>Registro</h2>
     <button class="primary block" data-act="import">Importa giornate / registro</button>
     <p class="small muted">Seleziona uno o più file <code>giornata_….txt</code> ricevuti via email o WhatsApp: vengono aggiunti al registro (se una giornata c'è già, viene aggiornata). Puoi anche aprire un registro completo salvato in precedenza.</p>
@@ -335,10 +368,10 @@ function vImpostazioni(){
     <input type="file" id="fileIn" accept=".json,.txt,application/json,text/plain" multiple hidden>
   </div>
   <div class="card">
-    <h2>Demo</h2>
+    <h2>Dati</h2>
     <div class="grid2">
-      <button class="ghost" data-act="demo">Carica dati di esempio</button>
-      <button class="danger" data-act="reset">Azzera tutto</button>
+      ${ghOn() ? '<span></span>' : '<button class="ghost" data-act="demo">Carica dati di esempio</button>'}
+      <button class="danger" data-act="reset">${ghOn() ? 'Azzera dati locali' : 'Azzera tutto'}</button>
     </div>
     <p class="small muted" style="margin-bottom:0">${state.updatedAt ? 'Ultima modifica: '+new Date(state.updatedAt).toLocaleString('it-IT') : 'Nessun dato salvato'}</p>
   </div>`;
@@ -366,25 +399,25 @@ const actions = {
     const s = openSession(), r = tally(s);
     if (!s.games.length) { toast('Nessuna partita registrata'); return; }
     if (!confirm(r.loser ? `Chiudere la giornata?\n${name(r.loser)} deve ${eur(r.euro)} alla cassa.` : 'Chiudere la giornata in parità?')) return;
-    s.closed = true; save(); ui.tab = 'storico'; ui.openId = s.id; toast('Giornata chiusa: ora puoi inviarla');
+    s.closed = true; save(); ui.tab = 'storico'; ui.openId = s.id; toast('Giornata chiusa'); sync();
   },
-  dropSession(){ if (!confirm('Annullare la giornata in corso? Le partite andranno perse.')) return; const s = openSession(); state.sessions = state.sessions.filter(x => x !== s); save(); },
+  dropSession(){ if (!confirm('Annullare la giornata in corso? Le partite andranno perse.')) return; const s = openSession(); tomb(s.id); state.sessions = state.sessions.filter(x => x !== s); save(); },
   togglePaid(el){ const s = findS(el.dataset.id); s.paid = !s.paid; save(); },
   reopen(el){
     if (openSession()) { toast('C\'è già una giornata in corso'); return; }
     findS(el.dataset.id).closed = false; save(); ui.tab = 'sessione';
   },
-  delSession(el){ if (!confirm('Eliminare definitivamente questa giornata?')) return; state.sessions = state.sessions.filter(s => s.id !== el.dataset.id); save(); },
+  delSession(el){ if (!confirm('Eliminare definitivamente questa giornata?')) return; tomb(el.dataset.id); state.sessions = state.sessions.filter(s => s.id !== el.dataset.id); save(); },
   addW(){
     const amt = num('wAmt'); if (amt <= 0) { toast('Inserisci un importo'); return; }
     state.withdrawals.push({ id:uid(), date: document.getElementById('wDate').value || todayISO(), amount: amt, note: document.getElementById('wNote').value.trim() });
     save(); toast('Spesa registrata');
   },
-  delW(el){ if (!confirm('Eliminare questa spesa?')) return; state.withdrawals = state.withdrawals.filter(w => w.id !== el.dataset.id); save(); },
+  delW(el){ if (!confirm('Eliminare questa spesa?')) return; tomb(el.dataset.id); state.withdrawals = state.withdrawals.filter(w => w.id !== el.dataset.id); save(); },
   saveNames(){
     state.players.a = document.getElementById('pA').value.trim() || 'Giocatore 1';
     state.players.b = document.getElementById('pB').value.trim() || 'Giocatore 2';
-    save(); toast('Nomi salvati');
+    state.playersMod = new Date().toISOString(); save(); toast('Nomi salvati');
   },
   export(){
     const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
@@ -405,8 +438,83 @@ const actions = {
     ];
     save(); ui.tab = 'cassa'; toast('Dati di esempio caricati');
   },
-  reset(){ if (!confirm('Cancellare TUTTI i dati?')) return; state = DEFAULT(); save(); },
+  reset(){ if (!confirm(ghOn() ? 'Cancellare i dati su questo dispositivo? Verranno ricaricati da GitHub alla prossima sincronizzazione.' : 'Cancellare TUTTI i dati?')) return; state = DEFAULT(); snapshot(); persist(); setDirty(false); if (ghOn()) sync(true); },
+  syncNow(){ sync(true); },
+  ghSave(){
+    gh = { owner: val('ghOwner'), repo: val('ghRepo'), path: val('ghPath') || 'registro.json', token: val('ghToken') || gh.token };
+    try { localStorage.setItem(GHKEY, JSON.stringify(gh)); } catch(e){}
+    paintSync(); sync(true);
+  },
+  ghOff(){ if (!confirm('Scollegare GitHub da questo dispositivo? I dati locali restano.')) return; gh.token = ''; try { localStorage.setItem(GHKEY, JSON.stringify(gh)); } catch(e){} paintSync(); },
 };
+
+/* ===================== Sincronizzazione GitHub ===================== */
+const GHKEY = 'bg_gh_cfg', METAKEY = 'bg_sync_meta';
+const readLS = k => { try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } };
+let gh = readLS(GHKEY) || { owner:'csdelvai-git', repo:'backgammon-dati', path:'registro.json', token:'' };
+let meta = readLS(METAKEY) || { dirty:false, last:null };
+let syncing = false, syncErr = '';
+const ghOn = () => !!gh.token;
+const val = id => document.getElementById(id).value.trim();
+function setDirty(v){ meta.dirty = v; try { localStorage.setItem(METAKEY, JSON.stringify(meta)); } catch(e){} paintSync(); }
+function paintSync(){
+  const el = document.getElementById('sync'); if (!el) return;
+  el.textContent = !ghOn() ? 'solo su questo dispositivo'
+    : syncing ? '⟳ sincronizzo…'
+    : syncErr ? '⚠ ' + syncErr
+    : meta.dirty ? '● da sincronizzare' : '✓ sincronizzato';
+}
+const b64enc = str => { const b = new TextEncoder().encode(str); let s = ''; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s); };
+const b64dec = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g,'')), c => c.charCodeAt(0)));
+function ghFetch(method, body){
+  const url = `https://api.github.com/repos/${encodeURIComponent(gh.owner)}/${encodeURIComponent(gh.repo)}/contents/${gh.path.split('/').map(encodeURIComponent).join('/')}`;
+  return fetch(url, { method, cache:'no-store', body: body && JSON.stringify(body),
+    headers: { Authorization:`Bearer ${gh.token}`, Accept:'application/vnd.github+json' } });
+}
+const ghError = st => st === 401 ? 'token non valido' : st === 403 ? 'token senza permessi' : st === 404 ? 'repo non trovato' : 'errore GitHub ' + st;
+// Unione: per ogni giornata/spesa vince la versione modificata più di recente; gli eliminati restano eliminati.
+function merge(L, R){
+  const del = [...new Set([...(L.deleted||[]), ...(R.deleted||[])])].sort();
+  const arr = (a = [], b = []) => {
+    const m = new Map();
+    for (const o of b) m.set(o.id, o);
+    for (const o of a) { const x = m.get(o.id); if (!x || (o.mod||'') >= (x.mod||'')) m.set(o.id, o); }
+    return [...m.values()].filter(o => !del.includes(o.id)).sort((x,y) => x.id < y.id ? -1 : 1);
+  };
+  const lp = (L.playersMod||'') >= (R.playersMod||'');
+  return { version:1, players: lp ? L.players : R.players, playersMod: (lp ? L.playersMod : R.playersMod) || null,
+    sessions: arr(L.sessions, R.sessions), withdrawals: arr(L.withdrawals, R.withdrawals), deleted: del,
+    updatedAt: [L.updatedAt, R.updatedAt].filter(Boolean).sort().pop() || null };
+}
+async function sync(manual, attempt = 0){
+  if (!ghOn()) { if (manual) { ui.tab = 'impostazioni'; render(); toast('Collega GitHub qui sotto'); } return; }
+  if (syncing) return;
+  syncing = true; syncErr = ''; paintSync();
+  try {
+    let r = await ghFetch('GET'), remote = null, sha = null;
+    if (r.status === 200) { const j = await r.json(); sha = j.sha; remote = normalize(JSON.parse(b64dec(j.content))); }
+    else if (r.status !== 404) throw new Error(ghError(r.status));
+    const before = JSON.stringify(state);
+    const merged = remote ? merge(state, remote) : merge(state, { players:{}, sessions:[], withdrawals:[], deleted:[] });
+    const needPush = !remote || JSON.stringify(merged) !== JSON.stringify(merge(remote, { players:{}, sessions:[], withdrawals:[], deleted:[] }));
+    if (needPush) {
+      const body = { message: `Registro aggiornato ${new Date().toLocaleString('it-IT')}`, content: b64enc(JSON.stringify(merged, null, 1)) };
+      if (sha) body.sha = sha;
+      r = await ghFetch('PUT', body);
+      if ((r.status === 409 || r.status === 422) && attempt < 2) { syncing = false; return sync(manual, attempt + 1); } // modificato altrove nel frattempo
+      if (!r.ok) throw new Error(ghError(r.status));
+    }
+    state = merged; snapshot(); persist();
+    meta.last = new Date().toISOString(); setDirty(false);
+    if (manual) toast(needPush ? 'Registro salvato su GitHub' : 'Già aggiornato');
+    if (JSON.stringify(state) !== before && !document.activeElement?.matches('input')) render();
+  } catch(e) {
+    syncErr = e instanceof TypeError ? 'offline' : e.message;
+    if (manual) toast('Sincronizzazione non riuscita: ' + syncErr);
+  } finally { syncing = false; paintSync(); }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && meta.dirty) sync(); });
+window.addEventListener('online', () => { if (meta.dirty) sync(); });
 
 /* ===================== Invio e importazione giornate ===================== */
 function sessionText(s){
@@ -448,7 +556,7 @@ async function importFiles(files){
         else { state.sessions.push(inc); added++; }
       } else if (d.sessions && d.players) {
         if (!confirm(`"${f.name}" è un registro completo. Sostituire tutti i dati attuali?`)) continue;
-        state = d; added += d.sessions.length;
+        state = normalize(d); added += d.sessions.length;
       } else bad++;
     } catch(e) { bad++; }
   }
@@ -469,7 +577,7 @@ document.addEventListener('change', e => {
   if (e.target.id === 'sEur') { const s = openSession(); s.euroPerPoint = num('sEur'); save(); render(); }
   if (e.target.id === 'fileIn') { importFiles([...e.target.files]); e.target.value = ''; }
 });
-render();
+snapshot(); render(); paintSync(); sync();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
