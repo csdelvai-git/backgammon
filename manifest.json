@@ -1,0 +1,15 @@
+{
+  "name": "Cassa Backgammon",
+  "short_name": "Backgammon",
+  "description": "Punti delle partite, storico delle giornate e cassa per la cena",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1f4d3a",
+  "theme_color": "#1f4d3a",
+  "lang": "it",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
